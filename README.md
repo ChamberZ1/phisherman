@@ -1,1 +1,1 @@
-This repo contians documents for my phishing detector project.
+The phisherman spreads his net.
