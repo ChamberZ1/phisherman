@@ -10,7 +10,9 @@ STANDARD_COLUMNS = [
     "from_address",
     "subject",
     "body",
+    "text_combined",
     "label",
+    "has_url",
 ]
 
 
@@ -92,10 +94,10 @@ def _prepare_dataframe(
 
     df = df.copy()
     # Loop through each required column name
-    for col in ("from_address", "subject", "body", "label"):
+    for col in ("from_address", "subject", "body", "label", "has_url"):
         if col not in df.columns:
-            # Add the column: empty string for text fields, None for label
-            df[col] = "" if col != "label" else None
+            # Add the column: empty string for text fields, None for label and has_url
+            df[col] = "" if (col != "label" and col != "has_url") else None
 
     # Process text columns: convert missing values and ensure they are strings
     for col in ("from_address", "subject", "body"):
@@ -128,7 +130,7 @@ def _prepare_dataframe(
     # Only keep the canonical columns if keep_extra is False
     if not keep_extra:
         # List of columns that should be in the final output
-        cols = ["source", "from_address", "subject", "body", "label", "text_combined"]
+        cols = ["source", "from_address", "subject", "body", "label", "text_combined", "has_url"]
         # .loc[:, [...]] selects all rows and only the specified columns; filtered to columns that exist
         df = df.loc[:, [c for c in cols if c in df.columns]]
 
@@ -151,20 +153,20 @@ def _select_loader(path) -> Callable:
     
     if "email text" in cols and "email type" in cols:
         return load_email_text_type
-    elif "subject" in cols and "body" in cols and "label" in cols:
+    elif "subject" in cols and "body" in cols and "label" in cols and len(cols) == 3:
         return load_subject_body_label
     elif "text_combined" in cols and "label" in cols:
         return load_text_combined
     else:
-        return load_5col
+        return load_7col
 
-def load_5col(
+def load_7col(
     path: Union[str, Path],
     source: str,
-    label_col: Optional[str] = None,
+    label_col: str = "label",
     keep_extra: bool = False,
 ) -> pd.DataFrame:
-    """Load files with sender, receiver, date, subject, body columns.
+    """Load files with sender, receiver, date, subject, body, urls, and label columns.
 
     ``label_col`` may be used if the dataset has an extra column containing the
     label (for instance ``"is_phish"``).  If no label column is present the
@@ -174,18 +176,11 @@ def load_5col(
     """
 
     df = pd.read_csv(path)
-    if "sender" in df.columns:
-        df["from_address"] = df["sender"]
-    if label_col and label_col in df.columns:
-        # Create a 'label' column by copying values from the specified label_col
-        df["label"] = df[label_col]
-    elif "label" in df.columns:
-        # Fall back to canonical name when already present
-        df["label"] = df["label"]
-    else:
-        # If no label column exists, the dataset cannot be used for supervised learning
-        # Return an empty dataframe with the correct schema to maintain consistency
-        return pd.DataFrame(columns=STANDARD_COLUMNS + ["text_combined"])
+    df["from_address"] = df.get("sender", "")
+    df["subject"] = df.get("subject", "")
+    df["body"] = df.get("body", "")
+    df["label"] = df.get(label_col, None)
+    df["has_url"] = df.get("urls", None)
 
     # Pass the dataframe to _prepare_dataframe to standardize it and apply transformations
     return _prepare_dataframe(df, source, keep_extra=keep_extra)
@@ -225,7 +220,6 @@ def load_subject_body_label(
     df["label"] = df.get(label_col, None)
     return _prepare_dataframe(df, source, keep_extra=keep_extra)
 
-# Currently unused
 def load_text_combined(
     path: Union[str, Path],
     source: str,
@@ -238,7 +232,6 @@ def load_text_combined(
     df = pd.read_csv(path)
     df["from_address"] = ""
     df["subject"] = ""
-    # Map the contents of text_col if it exists to 'body' column, otherwise returns the default value
     df["body"] = df.get(text_col, "")
     df["label"] = df.get(label_col, None)
     return _prepare_dataframe(df, source, keep_extra=keep_extra)
@@ -250,7 +243,7 @@ def load_all(
     """Load a collection of datasets and concatenate them.
 
     ``configs`` - a list of dictionaries containing the
-    the keys ``"load_fn"`` (a callable such as :func:`load_5col`),
+    the keys ``"load_fn"`` (a callable such as :func:`load_7col`),
     ``"path"`` (a filename) and ``"source"`` (string).  Additional kwargs are
     passed through to the load_fn.
 
@@ -258,7 +251,7 @@ def load_all(
 
         datasets = [
             {
-                "load_fn": load_5col,
+                "load_fn": load_7col,
                 "path": "data/ceas08.csv",
                 "source": "kaggle_bundle_ceas_08",
                 "label_col": "is_phish",
@@ -304,7 +297,7 @@ def load_all(
 
     # Return an empty df with the correct schema if no data was loaded from any dataset
     if not frames:
-        return pd.DataFrame(columns=STANDARD_COLUMNS + ["text_combined"])
+        return pd.DataFrame(columns=STANDARD_COLUMNS)
 
     # pd.concat() joins multiple dataframes vertically (stacks them on top of each other)
     # ignore_index=True resets the row index to 0, 1, 2, ... (instead of keeping original indices)
@@ -317,7 +310,7 @@ def load_all(
 
 # Exotic exports
 __all__ = [
-    "load_5col",
+    "load_7col",
     "load_email_text_type",
     "load_subject_body_label",
     "load_text_combined",

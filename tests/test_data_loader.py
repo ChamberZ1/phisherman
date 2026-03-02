@@ -35,30 +35,22 @@ def test_normalize_label():
         pass
 
 
-def test_load_5col_with_label():
-    csv = _make_csv("""sender,receiver,date,subject,body,label
-user@a.com,b@b.com,2020-01-01,hello,test,Phishing
+def test_load_7col_with_label():
+    csv = _make_csv("""sender,receiver,date,subject,body,label, urls
+user@a.com,b@b.com,2020-01-01,hello,test,Phishing, 1
 """)
-    df = data_loader.load_5col(csv, source="foo")
+    df = data_loader.load_7col(csv, source="foo")
     assert df.iloc[0]["label"] == 1
     assert "text_combined" in df.columns
 
-
-def test_load_5col_missing_label():
-    csv = _make_csv("""sender,receiver,date,subject,body
-user@a.com,b@b.com,2020-01-01,hello,test
+def test_load_7col_safe():
+    csv = _make_csv("""sender,receiver,date,subject,body,label, urls
+user@a.com,b@b.com,2020-01-01,hello,test,Safe, 1
 """)
-    df = data_loader.load_5col(csv, source="foo")
-    assert df.empty
-
-
-def test_load_5col_uses_label_column():
-    csv = _make_csv("""sender,receiver,date,subject,body,label
-u,v,2020-01-01,s,t,Safe
-""")
-    df = data_loader.load_5col(csv, source="foo")
-    assert not df.empty
+    df = data_loader.load_7col(csv, source="foo")
     assert df.iloc[0]["label"] == 0
+    assert "text_combined" in df.columns
+
 
 
 def test_load_email_text_type():
@@ -153,3 +145,17 @@ foo,Safe
     df = data_loader.load_all(configs)
     # loader should respect config-specified keep_extra (False) without TypeError
     assert "Email Text" not in df.columns
+
+
+def test_load_all_load_7col_with_label():
+    configs = [
+        {"path": _make_csv("""sender,receiver,date,subject,body,label,urls
+user@a.com,b@b.com,2020-01-01,hello,test,Safe,1
+"""), "source": "x"},
+    ]
+    df = data_loader.load_all(configs)
+    assert df.iloc[0]["label"] == 0
+    assert df.iloc[0]["has_url"] == 1
+    assert "text_combined" in df.columns
+    assert "sender" not in df.columns 
+    assert "from_address" in df.columns 
