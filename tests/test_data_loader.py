@@ -76,6 +76,13 @@ def test_subject_body_label():
 s, b, spam
 """)
     df = data_loader.load_subject_body_label(csv, source="baz")
+    assert "text_combined" in df.columns
+    assert "from_address" in df.columns 
+    assert "source" in df.columns
+    assert "subject" in df.columns
+    assert "body" in df.columns
+    assert "label" in df.columns
+    assert "has_url" in df.columns
     assert df.iloc[0]["label"] == 1
 
 
@@ -145,6 +152,14 @@ foo,Safe
     df = data_loader.load_all(configs)
     # loader should respect config-specified keep_extra (False) without TypeError
     assert "Email Text" not in df.columns
+    assert df.iloc[0]["has_url"] is None   
+    assert "text_combined" in df.columns
+    assert "from_address" in df.columns 
+    assert "source" in df.columns
+    assert "subject" in df.columns
+    assert "body" in df.columns
+    assert "label" in df.columns
+    assert "has_url" in df.columns
 
 
 def test_load_all_load_7col_with_label():
@@ -154,8 +169,14 @@ user@a.com,b@b.com,2020-01-01,hello,test,Safe,1
 """), "source": "x"},
     ]
     df = data_loader.load_all(configs)
+
+    assert "text_combined" in df.columns
+    assert "from_address" in df.columns 
+    assert "source" in df.columns
+    assert "subject" in df.columns
+    assert "body" in df.columns
+    assert "label" in df.columns
+    assert "has_url" in df.columns
+    assert "sender" not in df.columns 
     assert df.iloc[0]["label"] == 0
     assert df.iloc[0]["has_url"] == 1
-    assert "text_combined" in df.columns
-    assert "sender" not in df.columns 
-    assert "from_address" in df.columns 
