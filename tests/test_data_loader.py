@@ -180,3 +180,32 @@ user@a.com,b@b.com,2020-01-01,hello,test,Safe,1
     assert "sender" not in df.columns 
     assert df.iloc[0]["label"] == 0
     assert df.iloc[0]["has_url"] == 1
+
+
+def test_normalize_has_url():
+    mapping = {
+        1: 1,
+        0: 0,
+        1.0: 1,
+        0.0: 0,
+        "1": 1,
+        "0": 0,
+        "yes": 1,
+        "no": 0,
+        True: 1,
+        False: 0,
+        "unknown": None,
+        2: None,
+        None: None,
+    }
+    for inp, expected in mapping.items():
+        assert data_loader.normalize_has_url(inp) == expected
+
+
+def test_load_7col_invalid_has_url_becomes_none():
+    csv = _make_csv("""sender,receiver,date,subject,body,label,urls
+user@a.com,b@b.com,2020-01-01,hello,test,Safe,2
+""")
+    df = data_loader.load_7col(csv, source="foo")
+    assert df.iloc[0]["label"] == 0
+    assert pd.isna(df.iloc[0]["has_url"])

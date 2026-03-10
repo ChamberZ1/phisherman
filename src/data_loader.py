@@ -79,6 +79,33 @@ def normalize_label(raw: Any) -> Optional[int]:
     return None
 
 
+def normalize_has_url(raw: Any) -> Optional[int]:
+    """Return 0/1 for URL-presence flag or ``None`` if unknown/invalid."""
+
+    if pd.isna(raw):
+        return None
+
+    if isinstance(raw, bool):
+        return int(raw)
+
+    if isinstance(raw, Real) and raw in (0, 1):
+        return int(raw)
+
+    text = str(raw).strip().lower()
+    if not text:
+        return None
+
+    positives = {"1", "1.0", "yes", "true", "t", "y"}
+    negatives = {"0", "0.0", "no", "false", "f", "n"}
+
+    if text in positives:
+        return 1
+    if text in negatives:
+        return 0
+
+    return None
+
+
 def _prepare_dataframe(
     df: pd.DataFrame, source: str, keep_extra: bool = False
 ) -> pd.DataFrame:
@@ -104,8 +131,9 @@ def _prepare_dataframe(
         # .fillna("") replaces NaN/None with empty string; .astype(str) converts all values to string type
         df[col] = df[col].fillna("").astype(str)
 
-    # Apply label normalization function to every label value in the column
+    # Apply normalization helpers to canonical binary fields
     df["label"] = df["label"].apply(normalize_label)
+    df["has_url"] = df["has_url"].apply(normalize_has_url)
 
     # Keep only rows where label was successfully normalized (not None)
     df = df[df["label"].notna()]
@@ -316,4 +344,5 @@ __all__ = [
     "load_text_combined",
     "load_all",
     "normalize_label",
+    "normalize_has_url",
 ]

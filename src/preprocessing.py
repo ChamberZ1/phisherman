@@ -16,6 +16,8 @@ def basic_cleaning(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df[df["label"].notna()]  # drop rows with missing labels
 
+    df = df[df["label"].isin([0, 1])]
+
     df["label"] = df["label"].astype(int)  # ensure label is int type
 
     # ensure text_combined is string and normalise whitespace
