@@ -1,6 +1,6 @@
 ﻿import pandas as pd
 
-from src.features import FeatureEngineer, build_features
+from src.features import build_features
 
 
 def _make_base_df() -> pd.DataFrame:
@@ -68,15 +68,6 @@ def test_uppercase_feature_is_preserved_signal():
 
     assert out.loc[0, "num_uppercase_chars_body"] > out.loc[1, "num_uppercase_chars_body"]
     assert out.loc[0, "uppercase_ratio_body"] > out.loc[1, "uppercase_ratio_body"]
-
-
-def test_feature_engineer_wrapper_mutates_dataframe():
-    df = _make_base_df()
-    fe = FeatureEngineer(df)
-    out = fe.engineer_features()
-
-    assert "num_urls_in_text" in out.columns
-    assert out is fe.data
 
 
 def test_new_url_and_html_features():

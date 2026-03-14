@@ -43,19 +43,6 @@ KNOWN_BRAND_DOMAINS = [
     "coinbase.com",
 ]
 
-SHORTENER_DOMAINS = {
-    "bit.ly",
-    "tinyurl.com",
-    "t.co",
-    "goo.gl",
-    "is.gd",
-    "ow.ly",
-    "buff.ly",
-    "rebrand.ly",
-    "cutt.ly",
-    "tiny.cc",
-}
-
 RISKY_TLDS = {
     "zip",
     "review",
@@ -66,6 +53,18 @@ RISKY_TLDS = {
     "ml",
     "cf",
     "ga",
+}
+
+
+PUBLIC_SUFFIX_2LDS = {
+    "co.uk",
+    "org.uk",
+    "gov.uk",
+    "ac.uk",
+    "com.au",
+    "net.au",
+    "org.au",
+    "co.nz",
 }
 
 
@@ -84,22 +83,29 @@ def _extract_first_url(text: str) -> str:
     return match.group(0) if match else ""
 
 
-def _extract_urls(text: str) -> list[str]:
-    return URL_REGEX.findall(text)
-
 
 def _url_netloc(url: str) -> str:
     if not url:
         return ""
-    netloc = urlparse(url).netloc.lower()
+    try:
+        netloc = urlparse(url).netloc.lower()
+    except ValueError:
+        return ""
     return netloc.split(":")[0]
 
 
 def _root_domain(domain: str) -> str:
-    if not domain or domain.count(".") == 0:
-        return domain
-    parts = domain.split(".")
-    return ".".join(parts[-2:])
+    d = (domain or "").strip().lower()
+    if not d:
+        return ""
+    parts = [p for p in d.split(".") if p]
+    if len(parts) < 2:
+        return d
+
+    last_two = ".".join(parts[-2:])
+    if len(parts) >= 3 and last_two in PUBLIC_SUFFIX_2LDS:
+        return ".".join(parts[-3:])
+    return last_two
 
 
 def _char_entropy(text: str) -> float:
@@ -123,6 +129,16 @@ def _count_bare_domains(text: str) -> int:
     no_urls = URL_REGEX.sub(" ", text)
     return len(BARE_DOMAIN_REGEX.findall(no_urls))
 
+def _has_risky_tld(text: str) -> int:
+    for m in URL_REGEX.finditer(text):
+        domain = _url_netloc(m.group(0))
+        if not domain:
+            continue
+        parts = [p for p in domain.split(".") if p]
+        if parts and parts[-1].lower() in RISKY_TLDS:
+            return 1
+    return 0
+
 # currently just guardrail that doesn't do anything because the data structure is normalized in data_loader.py
 def _ensure_columns(df: pd.DataFrame, cols: list[str]) -> None:
     for col in cols:
@@ -134,6 +150,7 @@ def _add_text_features(out: pd.DataFrame, text: pd.Series, body: pd.Series, subj
     out["text_len"] = text.str.len()
     out["body_len"] = body.str.len()
     out["subject_len"] = subject.str.len()
+    out["subject_missing"] = (subject.str.strip() == "").astype(int)
     out["num_words_text"] = text.str.count(r"\S+")
     out["num_digits_text"] = text.str.count(r"\d")
     out["num_currency_symbols_text"] = text.str.count(CURRENCY_REGEX)
@@ -192,11 +209,7 @@ def _add_url_features(out: pd.DataFrame, text: pd.Series, has_url_col: str) -> N
         out["has_url_was_missing"] = 1
 
     out["first_url_domain"] = netloc
-    out["first_url_tld"] = netloc.str.extract(r"\.([a-z0-9-]+)$", expand=False).fillna("").str.lower()
-    out["tld_risk_flag"] = (
-        (out["has_url"] == 1)
-        & out["first_url_tld"].isin(RISKY_TLDS)
-    ).astype(int)
+    out["tld_risk_flag"] = text.apply(_has_risky_tld).astype(int)
 
 
 def _add_sender_features(out: pd.DataFrame, from_addr: pd.Series) -> None:
@@ -229,23 +242,27 @@ def _add_typosquat_features(
     sender_domain = from_addr.str.extract(r"@([^\s@]+)$", expand=False).fillna("")
     url_domain = _to_text(out.get("first_url_domain", pd.Series([""] * len(out), index=out.index)))
 
-    sender_metrics = sender_domain.apply(lambda d: best_brand_match(d, brand_domains))
-    out["sender_brand_similarity"] = sender_metrics.apply(lambda m: m["similarity"])
-    out["sender_brand_edit_distance"] = sender_metrics.apply(lambda m: m["edit_distance"])
-    out["sender_domain_punycode"] = sender_metrics.apply(lambda m: m["is_punycode"])
-    out["sender_domain_non_ascii"] = sender_metrics.apply(lambda m: m["has_non_ascii"])
-    out["sender_typosquat_flag"] = sender_metrics.apply(
+    unique_sender = sender_domain.drop_duplicates()
+    sender_map = {d: best_brand_match(d, brand_domains) for d in unique_sender}
+    sender_metrics = sender_domain.map(sender_map)
+    out["sender_brand_similarity"] = sender_metrics.map(lambda m: m["similarity"])
+    out["sender_brand_edit_distance"] = sender_metrics.map(lambda m: m["edit_distance"])
+    out["sender_domain_punycode"] = sender_metrics.map(lambda m: m["is_punycode"])
+    out["sender_domain_non_ascii"] = sender_metrics.map(lambda m: m["has_non_ascii"])
+    out["sender_typosquat_flag"] = sender_metrics.map(
         lambda m: typosquat_flag(m, similarity_threshold, max_edit_distance)
     )
 
-    url_metrics = url_domain.apply(lambda d: best_brand_match(d, brand_domains))
-    out["url_brand_similarity"] = url_metrics.apply(lambda m: m["similarity"])
-    out["url_brand_edit_distance"] = url_metrics.apply(lambda m: m["edit_distance"])
-    out["url_domain_punycode"] = url_metrics.apply(lambda m: m["is_punycode"])
-    out["url_domain_non_ascii"] = url_metrics.apply(lambda m: m["has_non_ascii"])
+    unique_url = url_domain.drop_duplicates()
+    url_map = {d: best_brand_match(d, brand_domains) for d in unique_url}
+    url_metrics = url_domain.map(url_map)
+    out["url_brand_similarity"] = url_metrics.map(lambda m: m["similarity"])
+    out["url_brand_edit_distance"] = url_metrics.map(lambda m: m["edit_distance"])
+    out["url_domain_punycode"] = url_metrics.map(lambda m: m["is_punycode"])
+    out["url_domain_non_ascii"] = url_metrics.map(lambda m: m["has_non_ascii"])
     out["url_typosquat_flag"] = (
         (out["has_url"] == 1)
-        & url_metrics.apply(lambda m: typosquat_flag(m, similarity_threshold, max_edit_distance) == 1)
+        & url_metrics.map(lambda m: typosquat_flag(m, similarity_threshold, max_edit_distance) == 1)
     ).astype(int)
 
 
@@ -282,6 +299,7 @@ def build_features(
     _add_text_features(out, text=text, body=body, subject=subject)
     _add_url_features(out, text=text, has_url_col=has_url_col)
     _add_sender_features(out, from_addr=from_addr)
+    out["from_subject_missing"] = ((out["sender_missing"] == 1) & (out["subject_missing"] == 1)).astype(int)
     brands = brand_domains if brand_domains is not None else KNOWN_BRAND_DOMAINS
     _add_typosquat_features(
         out,
@@ -292,19 +310,8 @@ def build_features(
     )
     _add_metadata_features(out)
 
-    out = out.drop(columns=["first_url", "first_url_domain", "first_url_tld"], errors="ignore")
+    out = out.drop(columns=["first_url", "first_url_domain"], errors="ignore")
     return out
 
 
-class FeatureEngineer:
-    """Compatibility wrapper around build_features."""
-
-    def __init__(self, data: pd.DataFrame):
-        self.data = data
-
-    def engineer_features(self) -> pd.DataFrame:
-        self.data = build_features(self.data, copy=False)
-        return self.data
-
-
-__all__ = ["build_features", "FeatureEngineer"]
+__all__ = ["build_features"]
