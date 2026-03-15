@@ -133,34 +133,6 @@ bar,1
     assert len(df2) == 2
     assert configs == orig
 
-def test_load_all_keep_extra():
-    configs = [
-        {"load_fn": data_loader.load_email_text_type, "path": _make_csv("""Email Text,Email Type
-foo,Safe
-"""), "source": "x", "keep_extra": True},
-    ]
-    df = data_loader.load_all(configs)
-    # loader should respect config-specified keep_extra (True) without TypeError
-    assert "Email Text" in df.columns
-
-def test_load_all_keep_extra_false():
-    configs = [
-        {"load_fn": data_loader.load_email_text_type, "path": _make_csv("""Email Text,Email Type
-foo,Safe
-"""), "source": "x", "keep_extra": False},
-    ]
-    df = data_loader.load_all(configs)
-    # loader should respect config-specified keep_extra (False) without TypeError
-    assert "Email Text" not in df.columns
-    assert df.iloc[0]["has_url"] is None   
-    assert "text_combined" in df.columns
-    assert "from_address" in df.columns 
-    assert "source" in df.columns
-    assert "subject" in df.columns
-    assert "body" in df.columns
-    assert "label" in df.columns
-    assert "has_url" in df.columns
-
 
 def test_load_all_load_7col_with_label():
     configs = [

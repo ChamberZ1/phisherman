@@ -94,10 +94,25 @@ def parse_args() -> argparse.Namespace:
         choices=["logreg", "linear_svm"],
         help="Which baseline model to train when --train-model is set",
     )
+    parser.add_argument(
+        "--text-col",
+        type=str,
+        default="text_combined",
+        help="Which text column to use for TF-IDF when --train-model is set",
+    )
     return parser.parse_args()
 
 
+
 def main() -> None:
+    '''
+    Example usage:
+    .\.venv\Scripts\python main.py --train-model --model logreg
+    .\.venv\Scripts\python main.py --train-model --model linear_svm
+    .\.venv\Scripts\python main.py --train-model --model logreg --text-col body
+
+    
+    '''
     args = parse_args()
     run_pipeline(
         raw_dir=args.raw_dir,
@@ -116,6 +131,7 @@ def main() -> None:
             val_file="val.csv",
             test_file="test.csv",
             target_col="label",
+            text_col=args.text_col,
             max_iter=2000,
             class_weight="balanced",
             random_state=args.random_state,

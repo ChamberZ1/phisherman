@@ -107,7 +107,7 @@ def normalize_has_url(raw: Any) -> Optional[int]:
 
 
 def _prepare_dataframe(
-    df: pd.DataFrame, source: str, keep_extra: bool = False
+    df: pd.DataFrame, source: str
 ) -> pd.DataFrame:
     """Standardise a dataframe returned by one of the structure-specific load_fns.
 
@@ -116,7 +116,7 @@ def _prepare_dataframe(
     - normalise ``label``
     - drop rows without a valid label or an empty body
     - add ``source`` and ``text_combined``
-    - optionally trim the output to the canonical columns
+    - trim the output to the canonical columns
     """
 
     df = df.copy()
@@ -155,12 +155,10 @@ def _prepare_dataframe(
         + df["body"]
     )
 
-    # Only keep the canonical columns if keep_extra is False
-    if not keep_extra:
-        # List of columns that should be in the final output
-        cols = ["source", "from_address", "subject", "body", "label", "text_combined", "has_url"]
-        # .loc[:, [...]] selects all rows and only the specified columns; filtered to columns that exist
-        df = df.loc[:, [c for c in cols if c in df.columns]]
+    # Keep only the canonical columns
+    cols = ["source", "from_address", "subject", "body", "label", "text_combined", "has_url"]
+    # .loc[:, [...]] selects all rows and only the specified columns; filtered to columns that exist
+    df = df.loc[:, [c for c in cols if c in df.columns]]
 
     # Return the standardized dataframe
     return df
@@ -192,7 +190,6 @@ def load_7col(
     path: Union[str, Path],
     source: str,
     label_col: str = "label",
-    keep_extra: bool = False,
 ) -> pd.DataFrame:
     """Load files with sender, receiver, date, subject, body, urls, and label columns.
 
@@ -211,7 +208,7 @@ def load_7col(
     df["has_url"] = df.get("urls", None)
 
     # Pass the dataframe to _prepare_dataframe to standardize it and apply transformations
-    return _prepare_dataframe(df, source, keep_extra=keep_extra)
+    return _prepare_dataframe(df, source)
 
 
 def load_email_text_type(
@@ -219,7 +216,6 @@ def load_email_text_type(
     source: str,
     text_col: str = "Email Text",
     label_col: str = "Email Type",
-    keep_extra: bool = False,
 ) -> pd.DataFrame:
     """Load two-column datasets with email text and an email type column."""
 
@@ -228,7 +224,7 @@ def load_email_text_type(
     df["subject"] = ""
     df["body"] = df.get(text_col, "")
     df["label"] = df.get(label_col, None)
-    return _prepare_dataframe(df, source, keep_extra=keep_extra)
+    return _prepare_dataframe(df, source)
 
 
 def load_subject_body_label(
@@ -237,7 +233,6 @@ def load_subject_body_label(
     subj_col: str = "subject",
     body_col: str = "body",
     label_col: str = "label",
-    keep_extra: bool = False,
 ) -> pd.DataFrame:
     """Load datasets that already have ``subject``, ``body`` and ``label``."""
 
@@ -246,14 +241,13 @@ def load_subject_body_label(
     df["subject"] = df.get(subj_col, "")
     df["body"] = df.get(body_col, "")
     df["label"] = df.get(label_col, None)
-    return _prepare_dataframe(df, source, keep_extra=keep_extra)
+    return _prepare_dataframe(df, source)
 
 def load_text_combined(
     path: Union[str, Path],
     source: str,
     text_col: str = "text_combined",
     label_col: str = "label",
-    keep_extra: bool = False,
 ) -> pd.DataFrame:
     """Load datasets where all textual information is in a single column."""
 
@@ -262,7 +256,7 @@ def load_text_combined(
     df["subject"] = ""
     df["body"] = df.get(text_col, "")
     df["label"] = df.get(label_col, None)
-    return _prepare_dataframe(df, source, keep_extra=keep_extra)
+    return _prepare_dataframe(df, source)
 
 
 def load_all(
@@ -310,15 +304,14 @@ def load_all(
 
         source = cfg_local.pop("source")
 
-        keep_extra = cfg_local.pop("keep_extra", False)
         # if path appears to be a file-like object, rewind it so it can be read again
         if hasattr(path, "seek"):
             try:
                 path.seek(0)
             except Exception:
                 pass
-        # Call the load_fn function with the path, source, keep_extra flag, and the remaining kwargs
-        df = load_fn(path, source=source, keep_extra=keep_extra, **cfg_local)
+        # Call the load_fn function with the path, source, and remaining kwargs
+        df = load_fn(path, source=source, **cfg_local)
         # If returned dataframe is not empty, add to list of dataframes
         if not df.empty:
             frames.append(df)

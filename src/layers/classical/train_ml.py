@@ -10,12 +10,11 @@ from joblib import dump
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.svm import LinearSVC
 
-from src.features import build_features
 
-
+# allows direct execution of this script for training after preprocessing in main.py
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Train phishing detector from processed train/val/test CSV splits."
@@ -26,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-file", type=str, default="val.csv")
     parser.add_argument("--test-file", type=str, default="test.csv")
     parser.add_argument("--target-col", type=str, default="label")
+    parser.add_argument("--text-col", type=str, default="text_combined")
     parser.add_argument("--max-iter", type=int, default=2000)
     parser.add_argument("--class-weight", type=str, default="balanced")
     parser.add_argument("--random-state", type=int, default=42)
@@ -41,10 +41,13 @@ def _load_split(path: Path) -> pd.DataFrame:
 def _to_xy(
     df: pd.DataFrame,
     target_col: str,
-    feature_cols: list[str] | None = None,
-) -> tuple[pd.DataFrame, pd.Series]:
+    text_col: str,
+) -> tuple[pd.Series, pd.Series]:
     if target_col not in df.columns:
         raise KeyError(f"Target column '{target_col}' not found in dataframe columns")
+
+    if text_col not in df.columns:
+        raise KeyError(f"Text column '{text_col}' not found in dataframe columns")
 
     y = pd.to_numeric(df[target_col], errors="coerce")
     if y.isna().any():
@@ -52,12 +55,7 @@ def _to_xy(
         raise ValueError(f"Target column '{target_col}' contains {bad} non-numeric values")
     y = y.astype(int)
 
-    X = df.drop(columns=[target_col], errors="ignore")
-    X = X.select_dtypes(include=["number", "bool"]).copy()
-
-    if feature_cols is not None:
-        X = X.reindex(columns=feature_cols, fill_value=0)
-
+    X = df[text_col].fillna("").astype(str)
     return X, y
 
 
@@ -87,22 +85,20 @@ def run_training(args: argparse.Namespace) -> tuple[Path, Path]:
     val_df = _load_split(val_path)
     test_df = _load_split(test_path)
 
-    # Build engineered features per split.
-    feat_train = build_features(train_df)
-    feat_val = build_features(val_df)
-    feat_test = build_features(test_df)
-
-    X_train, y_train = _to_xy(feat_train, target_col=args.target_col)
-    feature_cols = list(X_train.columns)
-    X_val, y_val = _to_xy(feat_val, target_col=args.target_col, feature_cols=feature_cols)
-    X_test, y_test = _to_xy(feat_test, target_col=args.target_col, feature_cols=feature_cols)
-
-    if not feature_cols:
-        raise ValueError("No numeric feature columns found after feature engineering")
+    X_train, y_train = _to_xy(train_df, target_col=args.target_col, text_col=args.text_col)
+    X_val, y_val = _to_xy(val_df, target_col=args.target_col, text_col=args.text_col)
+    X_test, y_test = _to_xy(test_df, target_col=args.target_col, text_col=args.text_col)
 
     class_weight = None if args.class_weight.lower() == "none" else args.class_weight
 
     model_name = getattr(args, "model", "logreg")
+
+    vectorizer = TfidfVectorizer(
+        analyzer="word",
+        ngram_range=(1, 2),
+        max_features=20000,
+        min_df=3,
+    )
 
     if model_name == "logreg":
         clf = LogisticRegression(
@@ -119,7 +115,7 @@ def run_training(args: argparse.Namespace) -> tuple[Path, Path]:
 
     model = Pipeline(
         steps=[
-            ("scaler", StandardScaler()),
+            ("tfidf", vectorizer),
             ("clf", clf),
         ]
     )
@@ -130,7 +126,7 @@ def run_training(args: argparse.Namespace) -> tuple[Path, Path]:
         "train": _evaluate(model, X_train, y_train),
         "val": _evaluate(model, X_val, y_val),
         "test": _evaluate(model, X_test, y_test),
-        "num_features": len(feature_cols),
+        "num_features": int(model.named_steps["tfidf"].get_feature_names_out().shape[0]),
     }
 
     args.models_dir.mkdir(parents=True, exist_ok=True)
@@ -140,8 +136,8 @@ def run_training(args: argparse.Namespace) -> tuple[Path, Path]:
     dump(
         {
             "model": model,
-            "feature_cols": feature_cols,
             "target_col": args.target_col,
+            "text_col": args.text_col,
         },
         model_path,
     )
