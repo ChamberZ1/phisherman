@@ -8,6 +8,13 @@ Training transformer... [GUH](docs/training_transformer.png)
 3) Unsupervised Layer - Isolation Forest
 4) Deep Learning Layer - Lightweight transformer model DistilBERT. Keep system modular so it can be swapped out for a heavier more accurate model if desired in the future.
 
+### Transformer (DistilBERT) training
+This project uses Hugging Face Transformers for the deep learning layer. Example:
+
+```bash
+.\.venv\Scripts\python -m src.layers.transformer.train_transformer --model-name distilbert-base-uncased
+```
+
 ### Datasets:
 1) [Enron and Nazario in one](https://www.kaggle.com/datasets/naserabdullahalam/phishing-email-dataset)
 2) [Kaggle dataset with only Email Text and Type](https://www.kaggle.com/datasets/subhajournal/phishingemails/data)

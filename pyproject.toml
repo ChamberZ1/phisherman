@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "phisherman"
+version = "0.1.0"
+dependencies = [
+    "accelerate",
+    "numpy",
+    "pandas>=2.0",
+    "scikit-learn",
+    "torch",
+    "transformers>=4.46",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (run with -m slow)",
+]
+filterwarnings = [
+    "ignore:.*pin_memory.*:UserWarning",
+]
