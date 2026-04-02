@@ -29,6 +29,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-iter", type=int, default=2000)
     parser.add_argument("--class-weight", type=str, default="balanced")
     parser.add_argument("--random-state", type=int, default=42)
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="logreg",
+        choices=["logreg", "linear_svm"],
+        help="Which model to train",
+    )
     return parser.parse_args()
 
 

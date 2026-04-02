@@ -1,5 +1,4 @@
 ﻿import argparse
-from types import SimpleNamespace
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +27,7 @@ def discover_csv_configs(raw_dir: Path) -> list[dict[str, Any]]:
     return configs
 
 
-def run_pipeline(
+def build_processed_splits(
     raw_dir: Path,
     processed_dir: Path,
     val_size: float,
@@ -82,39 +81,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable exact deduplication in data_loader.load_all",
     )
-    parser.add_argument(
-        "--train-model",
-        action="store_true",
-        help="Train baseline model after preprocessing using src/layers/classical/train_ml.py",
-    )
-    parser.add_argument(
-        "--model",
-        type=str,
-        default="logreg",
-        choices=["logreg", "linear_svm"],
-        help="Which baseline model to train when --train-model is set",
-    )
-    parser.add_argument(
-        "--text-col",
-        type=str,
-        default="text_combined",
-        help="Which text column to use for TF-IDF when --train-model is set",
-    )
     return parser.parse_args()
-
 
 
 def main() -> None:
     '''
     Example usage:
-    .\.venv\Scripts\python main.py --train-model --model logreg
-    .\.venv\Scripts\python main.py --train-model --model linear_svm
-    .\.venv\Scripts\python main.py --train-model --model logreg --text-col body
-
-    
+    .\.venv\Scripts\python main.py
+    .\.venv\Scripts\python main.py --raw-dir data/raw --processed-dir data/processed
     '''
     args = parse_args()
-    run_pipeline(
+    build_processed_splits(
         raw_dir=args.raw_dir,
         processed_dir=args.processed_dir,
         val_size=args.val_size,
@@ -122,22 +99,6 @@ def main() -> None:
         random_state=args.random_state,
         dedupe=not args.no_dedupe,
     )
-    if args.train_model:
-        from src.layers.classical import train_ml
-        train_args = SimpleNamespace(
-            processed_dir=args.processed_dir,
-            models_dir=Path("models"),
-            train_file="train.csv",
-            val_file="val.csv",
-            test_file="test.csv",
-            target_col="label",
-            text_col=args.text_col,
-            max_iter=2000,
-            class_weight="balanced",
-            random_state=args.random_state,
-            model=args.model,
-        )
-        train_ml.run_training(train_args)
 
 
 if __name__ == "__main__":
