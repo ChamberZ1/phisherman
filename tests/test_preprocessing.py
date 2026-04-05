@@ -150,8 +150,9 @@ def test_preprocess_and_split(tmp_path):
             "test": str(tmp_path / "test.csv"),
         },
     )
-    # cleaned df should have no empties and duplicates removed
-    assert (train["text_combined"] == "dup").sum() <= 1
+    # no duplicate text_combined values across the full dataset
+    all_texts = pd.concat([train, val, test])["text_combined"]
+    assert all_texts.duplicated().sum() == 0
     # saved files exist
     assert (tmp_path / "train.csv").exists()
     assert (tmp_path / "val.csv").exists()

@@ -14,7 +14,9 @@ def index():
 
 @app.route("/predict", methods=["POST"])
 def predict():
-    data = request.get_json()
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
     result = cascade.predict({
         "from_address": data.get("from_address", ""),
         "subject": data.get("subject", ""),

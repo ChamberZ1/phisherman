@@ -247,18 +247,18 @@ class TestCascadeLayerRouting:
             text_combined="FROM:  SUBJECT:  BODY: Visit http://192.168.0.1/verify"
         )
         result = cascade.predict(record)
-        if result["triggered_by"] == "rules":
-            assert result["supervised_proba"] is None
-            assert result["transformer_proba"] is None
-            assert result["isolation_score"] is None
+        assert result["triggered_by"] == "rules"
+        assert result["supervised_proba"] is None
+        assert result["transformer_proba"] is None
+        assert result["isolation_score"] is None
 
     def test_supervised_layer_skips_transformer_and_if(self):
         """When supervised fires, transformer and isolation scores should be None."""
         cascade = _make_cascade(supervised_proba=0.99, transformer_proba=0.1)
         result = cascade.predict(_make_record())
-        if result["triggered_by"] == "supervised":
-            assert result["transformer_proba"] is None
-            assert result["isolation_score"] is None
+        assert result["triggered_by"] == "supervised"
+        assert result["transformer_proba"] is None
+        assert result["isolation_score"] is None
 
 
 # ---------------------------------------------------------------------------

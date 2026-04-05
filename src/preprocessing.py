@@ -111,7 +111,7 @@ def stratified_split(
 
     try:
         from sklearn.model_selection import train_test_split
-    except Exception as e:  # ImportError or other
+    except ImportError as e:
         raise ImportError(
             "scikit-learn is required for stratified_split; install it with 'pip install scikit-learn'"
         ) from e

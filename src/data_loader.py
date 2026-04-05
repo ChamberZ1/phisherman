@@ -308,7 +308,7 @@ def load_all(
         if hasattr(path, "seek"):
             try:
                 path.seek(0)
-            except Exception:
+            except OSError:
                 pass
         # Call the load_fn function with the path, source, and remaining kwargs
         df = load_fn(path, source=source, **cfg_local)
