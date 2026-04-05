@@ -53,16 +53,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--processed-dir", type=Path, default=Path("data/processed"))
     parser.add_argument("--models-dir", type=Path, default=Path("models"))
-    parser.add_argument("--train-file", type=str, default="train.csv")
+    parser.add_argument("--train-file", type=str, default="benign_only.csv")  # changed to benign_only
     parser.add_argument("--val-file", type=str, default="val.csv")
     parser.add_argument("--test-file", type=str, default="test.csv")
     parser.add_argument("--target-col", type=str, default="label")
     parser.add_argument("--n-estimators", type=int, default=200)
     parser.add_argument(
         "--contamination",
-        type=float,
-        default=0.1,
-        help="Expected fraction of outliers in the training set.",
+        type=lambda x: float(x) if x != "auto" else "auto",
+        default="auto",
+        help="Expected fraction of outliers in the training set, or 'auto'.",
     )
     parser.add_argument("--random-state", type=int, default=42)
     return parser.parse_args()
@@ -71,8 +71,11 @@ def parse_args() -> argparse.Namespace:
 def _load_features(path: Path, target_col: str) -> tuple[pd.DataFrame, pd.Series]:
     df = pd.read_csv(path)
     df = build_features(df)
+    # Keep only the engineered feature columns that were actually produced.
     present = [c for c in FEATURE_COLS if c in df.columns]
+    # X is the numeric feature matrix used to train/evaluate the model.
     X = df[present].fillna(0).astype(float)
+    # y is the ground-truth label column converted to integer classes.
     y = df[target_col].astype(int)
     return X, y
 
@@ -112,7 +115,7 @@ def run_training(args: argparse.Namespace) -> tuple[Path, Path]:
         random_state=args.random_state,
         n_jobs=-1,
     )
-    model.fit(X_train)
+    model.fit(X_train)  # y_train (label) is not used since it's unsupervised
 
     metrics = {
         "train": _evaluate(model, X_train, y_train),

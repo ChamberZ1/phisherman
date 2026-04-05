@@ -175,7 +175,7 @@ def _select_loader(path) -> Callable:
             pass
 
     df = pd.read_csv(path, nrows=0)  # Read only the header row to get column names
-    cols = set(df.columns.str.lower())  # Convert column names to lowercase for case-ins
+    cols = set(df.columns.str.lower())  # Convert column names to lowercase for case-insensitive matching
     
     if "email text" in cols and "email type" in cols:
         return load_email_text_type

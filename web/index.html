@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Phisherman</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, sans-serif;
+      background: #000;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 48px 16px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 680px;
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: #fff;
+    }
+
+    p.subtitle {
+      font-size: 0.9rem;
+      color: #888;
+      margin-bottom: 32px;
+    }
+
+    label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 6px;
+    }
+
+    input, textarea {
+      width: 100%;
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 0.95rem;
+      padding: 10px 14px;
+      outline: none;
+      transition: border-color 0.15s;
+      font-family: inherit;
+    }
+
+    input:focus, textarea:focus {
+      border-color: #fff;
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 160px;
+    }
+
+    .field {
+      margin-bottom: 20px;
+    }
+
+    button {
+      width: 100%;
+      padding: 12px;
+      background: #fff;
+      color: #000;
+      font-size: 1rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      margin-top: 4px;
+    }
+
+    button:hover { background: #ddd; }
+    button:disabled { background: #444; color: #888; cursor: not-allowed; }
+
+    /* Result card */
+    #result {
+      margin-top: 32px;
+      display: none;
+    }
+
+    .verdict {
+      border-radius: 10px;
+      padding: 20px 24px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .verdict.phishing {
+      background: #111;
+      border: 1px solid #fff;
+    }
+
+    .verdict.benign {
+      background: #111;
+      border: 1px solid #555;
+    }
+
+    .verdict-icon {
+      font-size: 2rem;
+      line-height: 1;
+    }
+
+    .verdict-label {
+      font-size: 1.25rem;
+      font-weight: 700;
+    }
+
+    .verdict.phishing .verdict-label { color: #fff; }
+    .verdict.benign .verdict-label { color: #aaa; }
+
+    .verdict-sub {
+      font-size: 0.85rem;
+      color: #888;
+      margin-top: 2px;
+    }
+
+    /* Detail grid */
+    .details {
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 10px;
+      padding: 16px 20px;
+    }
+
+    .details h2 {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 14px;
+    }
+
+    .detail-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid #222;
+      font-size: 0.9rem;
+    }
+
+    .detail-row:last-child { border-bottom: none; }
+
+    .detail-key { color: #888; }
+    .detail-val { color: #fff; font-weight: 500; }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      margin-left: 4px;
+    }
+
+    .tag-red { background: #fff; color: #000; }
+    .tag-green { background: #333; color: #fff; }
+    .tag-gray { background: #222; color: #888; }
+    .tag-yellow { background: #555; color: #fff; }
+
+    .rule-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid #4444;
+      border-top-color: #000;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Phisherman</h1>
+    <p class="subtitle">Paste an email below to analyse it for phishing.</p>
+
+    <div class="field">
+      <label for="from_address">From address</label>
+      <input type="text" id="from_address" placeholder="sender@example.com" />
+    </div>
+
+    <div class="field">
+      <label for="subject">Subject</label>
+      <input type="text" id="subject" placeholder="Email subject line" />
+    </div>
+
+    <div class="field">
+      <label for="body">Body</label>
+      <textarea id="body" placeholder="Paste the email body here..."></textarea>
+    </div>
+
+    <button id="analyseBtn" onclick="analyse()">Analyse</button>
+
+    <div id="result"></div>
+  </div>
+
+  <script>
+    async function analyse() {
+      const btn = document.getElementById("analyseBtn");
+      const resultDiv = document.getElementById("result");
+
+      const from_address = document.getElementById("from_address").value.trim();
+      const subject = document.getElementById("subject").value.trim();
+      const body = document.getElementById("body").value.trim();
+
+      if (!from_address) {
+        alert("Please enter a from address.");
+        return;
+      }
+
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>Analysing…';
+      resultDiv.style.display = "none";
+
+      try {
+        const res = await fetch("/predict", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ from_address, subject, body }),
+        });
+
+        const data = await res.json();
+        resultDiv.innerHTML = renderResult(data);
+        resultDiv.style.display = "block";
+      } catch (e) {
+        resultDiv.innerHTML = `<p style="color:#fff">Error: ${e.message}</p>`;
+        resultDiv.style.display = "block";
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Analyse";
+      }
+    }
+
+    function pct(val) {
+      if (val === null || val === undefined) return "—";
+      return (val * 100).toFixed(1) + "%";
+    }
+
+    function scoreTag(val, threshold) {
+      if (val === null || val === undefined) return `<span class="tag tag-gray">—</span>`;
+      const p = (val * 100).toFixed(1) + "%";
+      const cls = val >= threshold ? "tag-red" : "tag-green";
+      return `<span class="tag ${cls}">${p}</span>`;
+    }
+
+    function triggeredTag(layer) {
+      if (!layer) return `<span class="tag tag-green">none (benign)</span>`;
+      const map = {
+        rules: "tag-red",
+        supervised: "tag-red",
+        transformer: "tag-red",
+        isolation_forest: "tag-yellow",
+      };
+      return `<span class="tag ${map[layer] || 'tag-gray'}">${layer}</span>`;
+    }
+
+    function renderResult(d) {
+      const isPhish = d.is_phish === 1;
+      const verdictClass = isPhish ? "phishing" : "benign";
+      const icon = isPhish ? "🎣" : "✅";
+      const label = isPhish ? "Phishing detected" : "Looks clean";
+      const sub = isPhish
+        ? `Triggered by: ${d.triggered_by} &mdash; confidence ${pct(d.confidence)}`
+        : `Confidence: ${pct(d.confidence)}`;
+
+      const rules = d.rule_matches && d.rule_matches.length
+        ? d.rule_matches.map(r => `<span class="tag tag-red">${r}</span>`).join("")
+        : `<span class="tag tag-gray">none</span>`;
+
+      return `
+        <div class="verdict ${verdictClass}">
+          <div class="verdict-icon">${icon}</div>
+          <div>
+            <div class="verdict-label">${label}</div>
+            <div class="verdict-sub">${sub}</div>
+          </div>
+        </div>
+
+        <div class="details">
+          <h2>Layer breakdown</h2>
+
+          <div class="detail-row">
+            <span class="detail-key">Rule score</span>
+            <span class="detail-val">${d.rule_score ?? "—"} / max</span>
+          </div>
+
+          <div class="detail-row">
+            <span class="detail-key">Rule matches</span>
+            <span class="detail-val"><div class="rule-list">${rules}</div></span>
+          </div>
+
+          <div class="detail-row">
+            <span class="detail-key">Supervised probability</span>
+            <span class="detail-val">${scoreTag(d.supervised_proba, 0.5)}</span>
+          </div>
+
+          <div class="detail-row">
+            <span class="detail-key">Transformer probability</span>
+            <span class="detail-val">${scoreTag(d.transformer_proba, 0.5)}</span>
+          </div>
+
+          <div class="detail-row">
+            <span class="detail-key">Isolation Forest score</span>
+            <span class="detail-val">${scoreTag(d.isolation_score, 0.55)}</span>
+          </div>
+
+          <div class="detail-row">
+            <span class="detail-key">Triggered by</span>
+            <span class="detail-val">${triggeredTag(d.triggered_by)}</span>
+          </div>
+        </div>
+      `;
+    }
+  </script>
+</body>
+</html>

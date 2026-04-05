@@ -170,9 +170,6 @@ def preprocess_and_split(
     train, val, test = stratified_split(
         deduped, val_size=val_size, test_size=test_size, random_state=random_state
     )
-    # print("\ntrain:\n", train)
-    # print("\nval:\n", val)
-    # print("\ntest:\n", test)
     if save_paths:
         if "train" in save_paths:
             train.to_csv(save_paths["train"], index=False)

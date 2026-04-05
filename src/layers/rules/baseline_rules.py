@@ -3,65 +3,11 @@ from dataclasses import dataclass
 from typing import Callable, Iterable
 from urllib.parse import urlparse
 
-
-URL_REGEX = re.compile(r"https?://[^\s<>'\"]+", re.IGNORECASE)
-SHORTENER_REGEX = re.compile(
-    r"\b(?:https?://)?(?:www\.)?(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|is\.gd|ow\.ly|buff\.ly|rebrand\.ly|cutt\.ly|tiny\.cc)(?:/[^\s<>\'\"]*)?",
-    re.IGNORECASE,
+from src.email_detection_constants import (
+    URL_REGEX, SHORTENER_REGEX, URGENT_REGEX, ACTION_REGEX,
+    CREDENTIAL_REGEX, CRYPTO_REGEX, IP_DOMAIN_REGEX,
+    FREE_EMAIL_DOMAINS, KNOWN_BRAND_DOMAINS, RISKY_TLDS, PUBLIC_SUFFIX_2LDS,
 )
-URGENT_REGEX = re.compile(r"\b(?:urgent|immediate|action required|verify|suspend|locked|alert)\b", re.IGNORECASE)
-ACTION_REGEX = re.compile(r"\b(?:click|login|confirm|update|reset|submit|open)\b", re.IGNORECASE)
-CREDENTIAL_REGEX = re.compile(r"\b(?:password|credential|ssn|account|bank|billing|payment|wallet)\b", re.IGNORECASE)
-CRYPTO_REGEX = re.compile(r"\b(?:seed phrase|btc|bitcoin|eth|ethereum|usdt|crypto)\b", re.IGNORECASE)
-IP_DOMAIN_REGEX = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
-
-
-FREE_EMAIL_DOMAINS = {
-    "gmail.com",
-    "yahoo.com",
-    "outlook.com",
-    "hotmail.com",
-    "aol.com",
-    "icloud.com",
-    "proton.me",
-    "protonmail.com",
-}
-
-KNOWN_BRAND_DOMAINS = [
-    "paypal.com",
-    "microsoft.com",
-    "apple.com",
-    "amazon.com",
-    "google.com",
-    "bankofamerica.com",
-    "chase.com",
-    "wellsfargo.com",
-    "citibank.com",
-    "coinbase.com",
-]
-
-RISKY_TLDS = {
-    "zip",
-    "review",
-    "work",
-    "click",
-    "gq",
-    "tk",
-    "ml",
-    "cf",
-    "ga",
-}
-
-PUBLIC_SUFFIX_2LDS = {
-    "co.uk",
-    "org.uk",
-    "gov.uk",
-    "ac.uk",
-    "com.au",
-    "net.au",
-    "org.au",
-    "co.nz",
-}
 
 
 def _to_text(value: object) -> str:
