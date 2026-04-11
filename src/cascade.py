@@ -9,9 +9,15 @@ from joblib import load
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from src.features import build_features
-from src.layers.rules.baseline_rules import classify_with_rules
+from src.layers.rules.baseline_rules import evaluate_baseline_rules, _root_domain
+from src.email_detection_constants import TRUSTED_SENDING_DOMAINS, TRUSTED_FROM_SUBDOMAINS
 
 import pandas as pd
+
+
+# Rules that are high-confidence technical signals strong enough to trigger a
+# phishing verdict on their own, without requiring ML agreement.
+HARD_BLOCK_RULES: frozenset[str] = frozenset({"ip_url", "punycode_domain", "malicious_attachment_ext"})
 
 
 # ---------------------------------------------------------------------------
@@ -105,22 +111,35 @@ def _predict_transformer(
 # ---------------------------------------------------------------------------
 
 class PhishingCascade:
-    """Four-layer phishing detection cascade.
+    """Phishing detection cascade with consensus voting.
 
-    Layers (in order):
-      1. Rule-based  — weighted heuristic rules, fast pre-filter
-      2. Supervised  — TF-IDF + LinearSVC, strong baseline classifier
-      3. Transformer — DistilBERT fine-tuned classifier, deep semantic layer
-      4. Isolation Forest — anomaly detection, weak last-resort layer
+    All four layers run on every email. A phishing verdict requires agreement
+    from at least two independent sources, which dramatically reduces false
+    positives from any single over-eager model.
+
+    Decision logic (evaluated in order):
+      1. Hard-block rules (ip_url, punycode_domain) — fire immediately, no
+         ML agreement needed. These are narrow, high-precision technical
+         signals with almost no legitimate use.
+      2. ML consensus — supervised AND transformer both exceed their threshold.
+      3. Rule-assisted — rule score >= rule_vote_threshold AND at least one
+         ML model exceeds its threshold.
+      4. Benign — fewer than two sources agree.
+
+    The Isolation Forest (ROC-AUC ~0.61) is too weak to vote but its score is
+    included in every result for diagnostic purposes.
 
     Args:
         supervised_model_path: Path to the joblib file for the supervised model.
         isolation_forest_path: Path to the joblib file for the Isolation Forest.
         transformer_dir: Directory containing the fine-tuned transformer.
-        rule_threshold: Minimum rule score to immediately flag as phishing.
-        supervised_threshold: Probability above which supervised flags as phishing.
-        transformer_threshold: Probability above which transformer flags as phishing.
-        isolation_threshold: Anomaly score above which Isolation Forest flags as phishing.
+        rule_vote_threshold: Minimum rule score (from non-hard-block rules) for
+            the rule layer to contribute a vote toward a rule-assisted verdict.
+        supervised_threshold: Probability above which supervised casts a phish vote.
+        transformer_threshold: Probability above which transformer casts a phish vote.
+        transformer_certainty_threshold: Probability above which the transformer
+            triggers a verdict alone, without requiring a second vote. Reserved for
+            cases where the transformer is near-certain (default 0.995).
         transformer_max_length: Max token length for the transformer.
     """
 
@@ -129,16 +148,16 @@ class PhishingCascade:
         supervised_model_path: str | Path = Path("models/textcombined_svm.joblib"),
         isolation_forest_path: str | Path = Path("models/isolation_forest.joblib"),
         transformer_dir: str | Path = Path("models/distilbert"),
-        rule_threshold: int = 3,
-        supervised_threshold: float = 0.7,
-        transformer_threshold: float = 0.7,
-        isolation_threshold: float = 0.75,
+        rule_vote_threshold: int = 3,
+        supervised_threshold: float = 0.55,
+        transformer_threshold: float = 0.75,
+        transformer_certainty_threshold: float = 0.995,
         transformer_max_length: int = 256,
     ) -> None:
-        self.rule_threshold = rule_threshold
+        self.rule_vote_threshold = rule_vote_threshold
         self.supervised_threshold = supervised_threshold
         self.transformer_threshold = transformer_threshold
-        self.isolation_threshold = isolation_threshold
+        self.transformer_certainty_threshold = transformer_certainty_threshold
         self.transformer_max_length = transformer_max_length
 
         self._supervised = load_supervised(supervised_model_path)
@@ -154,7 +173,8 @@ class PhishingCascade:
 
         Returns:
             Dict with ``is_phish``, ``confidence``, ``triggered_by``, and
-            per-layer scores.
+            per-layer scores. ``triggered_by`` is one of ``"rules"``,
+            ``"ml_consensus"``, ``"rule_assisted"``, or ``None`` (benign).
         """
         # Ensure text_combined exists for layers that need it
         if "text_combined" not in record or not record["text_combined"]:
@@ -177,11 +197,14 @@ class PhishingCascade:
         }
 
         # --- Layer 1: Rules ---
-        rule_result = classify_with_rules(record, threshold=self.rule_threshold)
+        rule_result = evaluate_baseline_rules(record)
         result["rule_score"] = rule_result["score"]
-        result["rule_matches"] = [m["rule_id"] for m in rule_result["matches"]]
+        matched_ids = {m["rule_id"] for m in rule_result["matches"]}
+        result["rule_matches"] = list(matched_ids)
 
-        if rule_result["is_phish"]:
+        # Hard-block: narrow, high-precision technical signals that require no
+        # ML confirmation (raw IP URLs, punycode/homograph domains).
+        if matched_ids & HARD_BLOCK_RULES:
             result["is_phish"] = 1
             result["confidence"] = 1.0
             result["triggered_by"] = "rules"
@@ -191,36 +214,103 @@ class PhishingCascade:
         supervised_proba = _predict_supervised(self._supervised, record)
         result["supervised_proba"] = supervised_proba
 
-        if supervised_proba >= self.supervised_threshold:
-            result["is_phish"] = 1
-            result["confidence"] = supervised_proba
-            result["triggered_by"] = "supervised"
-            return result
-
         # --- Layer 3: Transformer ---
         transformer_proba = _predict_transformer(
             self._transformer, self._tokenizer, record, self.transformer_max_length
         )
         result["transformer_proba"] = transformer_proba
 
-        if transformer_proba >= self.transformer_threshold:
-            result["is_phish"] = 1
-            result["confidence"] = transformer_proba
-            result["triggered_by"] = "transformer"
-            return result
-
         # --- Layer 4: Isolation Forest (scoring only) ---
-        # Isolation Forest achieved ROC-AUC of ~0.61 — too weak to make final decisions
-        # without causing excessive false positives. Its score is included in the output
-        # for informational purposes only and does not affect the final verdict.
+        # ROC-AUC ~0.61 — too weak to vote on its own. Included for diagnostics.
         isolation_score = _predict_isolation_forest(self._if_bundle, record)
         result["isolation_score"] = isolation_score
 
-        # Benign — fill in remaining scores and set confidence to how far below threshold
+        # --- DKIM trusted sender check ---
+        # If the email has a verified DKIM signature from a known-trusted domain,
+        # suppress all ML verdict paths to avoid false positives on legitimate
+        # transactional email. Hard-block rules still fire regardless.
+        dkim_pass = bool(record.get("dkim_pass", False))
+        dkim_domain = record.get("dkim_domain") or ""
+        dkim_root = _root_domain(dkim_domain)
+
+        # Broad trust: DKIM root domain is in the trusted sending list
+        broad_trusted = dkim_pass and bool(dkim_domain) and dkim_root in TRUSTED_SENDING_DOMAINS
+
+        # Subdomain trust: platform whose broad domain is abusable (e.g. google.com
+        # via Forms/Sites) but specific From subdomains are not (e.g. accounts.google.com)
+        from_domain = ""
+        from_addr = record.get("from_address") or ""
+        if "@" in from_addr:
+            from_domain = from_addr.split("@")[-1].lower()
+        subdomain_trusted = (
+            dkim_pass
+            and dkim_root in TRUSTED_FROM_SUBDOMAINS
+            and from_domain in TRUSTED_FROM_SUBDOMAINS[dkim_root]
+        )
+
+        dkim_trusted = broad_trusted or subdomain_trusted
+
+        # --- Consensus voting ---
+        supervised_votes_phish = supervised_proba >= self.supervised_threshold
+        transformer_votes_phish = transformer_proba >= self.transformer_threshold
+        rules_vote = rule_result["score"] >= self.rule_vote_threshold
+
+        # For DKIM-verified trusted senders, all ML-based verdict paths are suppressed.
+        # A cryptographic DKIM signature from a known domain is more reliable than
+        # models trained on 2001 data that cannot distinguish legitimate transactional
+        # email ("verify your account") from phishing with the same language.
+        # Hard-block rules still fire regardless — a verified sender with a raw IP URL
+        # or punycode domain is genuinely suspicious.
+
+        # Transformer near-certainty override — at ≥0.995 it acts alone
+        if not dkim_trusted and transformer_proba >= self.transformer_certainty_threshold:
+            result["is_phish"] = 1
+            result["confidence"] = transformer_proba
+            result["triggered_by"] = "transformer_certain"
+            return result
+
+        # Transformer high-confidence + supervised corroboration (0.99 ≤ trf < 0.995)
+        if not dkim_trusted and transformer_proba >= 0.99 and supervised_votes_phish:
+            result["is_phish"] = 1
+            result["confidence"] = (transformer_proba + supervised_proba) / 2
+            result["triggered_by"] = "transformer_corroborated"
+            return result
+
+        # Transformer near-certain + rule corroboration (0.95 ≤ trf < 0.99, rules ≥ 2)
+        if not dkim_trusted and transformer_proba >= 0.95 and rule_result["score"] >= 2:
+            result["is_phish"] = 1
+            result["confidence"] = transformer_proba
+            result["triggered_by"] = "transformer_rule_corroborated"
+            return result
+
+        # Transformer dominant — very high confidence with weak supervised corroboration.
+        # Supervised ≥ 0.40 acts as a sanity check (not a full vote): ensures the supervised
+        # model isn't actively calling the email benign before trusting the transformer alone.
+        if not dkim_trusted and transformer_proba >= 0.97 and supervised_proba >= 0.40:
+            result["is_phish"] = 1
+            result["confidence"] = transformer_proba
+            result["triggered_by"] = "transformer_dominant"
+            return result
+
+        # Both ML models independently agree → high confidence verdict
+        if not dkim_trusted and supervised_votes_phish and transformer_votes_phish:
+            result["is_phish"] = 1
+            result["confidence"] = (supervised_proba + transformer_proba) / 2
+            result["triggered_by"] = "ml_consensus"
+            return result
+
+        # Rule signal + one ML model → rule-assisted verdict
+        if not dkim_trusted and rules_vote and (supervised_votes_phish or transformer_votes_phish):
+            result["is_phish"] = 1
+            result["confidence"] = max(supervised_proba, transformer_proba)
+            result["triggered_by"] = "rule_assisted"
+            return result
+
+        # Benign — confidence reflects how far below threshold the strongest signal is
         result["is_phish"] = 0
         result["confidence"] = 1.0 - max(supervised_proba, transformer_proba)
         result["triggered_by"] = None
         return result
 
 
-__all__ = ["PhishingCascade"]
+__all__ = ["PhishingCascade", "HARD_BLOCK_RULES"]

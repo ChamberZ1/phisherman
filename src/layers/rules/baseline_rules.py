@@ -1,4 +1,3 @@
-import re
 from dataclasses import dataclass
 from typing import Callable, Iterable
 from urllib.parse import urlparse
@@ -7,6 +6,7 @@ from src.email_detection_constants import (
     URL_REGEX, SHORTENER_REGEX, URGENT_REGEX, ACTION_REGEX,
     CREDENTIAL_REGEX, CRYPTO_REGEX, IP_DOMAIN_REGEX,
     FREE_EMAIL_DOMAINS, KNOWN_BRAND_DOMAINS, RISKY_TLDS, PUBLIC_SUFFIX_2LDS,
+    HARD_BLOCK_EXTENSIONS, SUSPICIOUS_EXTENSIONS, ATTACHMENT_LURE_REGEX,
 )
 
 
@@ -134,6 +134,23 @@ def _rule_punycode_domain(record: dict) -> bool:
     return any(_has_punycode_or_non_ascii(_url_netloc(u)) for u in urls)
 
 
+def _rule_malicious_attachment_ext(record: dict) -> bool:
+    exts = record.get("attachment_extensions") or []
+    return bool(set(exts) & HARD_BLOCK_EXTENSIONS)
+
+
+def _rule_suspicious_attachment_lure(record: dict) -> bool:
+    """Suspicious (non-hard-block) attachment extension combined with lure language."""
+    exts = set(record.get("attachment_extensions") or [])
+    if not exts:
+        return False
+    has_suspicious = bool(exts & (SUSPICIOUS_EXTENSIONS | HARD_BLOCK_EXTENSIONS))
+    if not has_suspicious:
+        return False
+    text = _to_text(record.get("text_combined", ""))
+    return bool(ATTACHMENT_LURE_REGEX.search(text))
+
+
 def _rule_subject_missing_with_url(record: dict) -> bool:
     subject = _to_text(record.get("subject", "")).strip()
     text = _to_text(record.get("text_combined", ""))
@@ -143,11 +160,23 @@ def _rule_subject_missing_with_url(record: dict) -> bool:
 
 def _rule_many_urls(record: dict) -> bool:
     text = _to_text(record.get("text_combined", ""))
-    urls = _extract_urls(text)
+    urls = set(_extract_urls(text))
     return len(urls) >= 3
 
 
 BASELINE_RULES: list[Rule] = [
+    Rule(
+        rule_id="malicious_attachment_ext",
+        description="Attachment uses a directly-executable or credential-harvesting extension",
+        weight=3,
+        predicate=_rule_malicious_attachment_ext,
+    ),
+    Rule(
+        rule_id="suspicious_attachment_lure",
+        description="Suspicious attachment extension paired with invoice/payment lure language",
+        weight=2,
+        predicate=_rule_suspicious_attachment_lure,
+    ),
     Rule(
         rule_id="free_sender_brand_text",
         description="Free email sender with brand terms in message",
@@ -232,16 +261,8 @@ def evaluate_baseline_rules(record: dict) -> dict:
     return {"score": score, "matches": matches}
 
 
-def classify_with_rules(record: dict, threshold: int = 3) -> dict:
-    """Classify a record using baseline rules and a score threshold."""
-    result = evaluate_baseline_rules(record)
-    result["is_phish"] = int(result["score"] >= threshold)
-    result["threshold"] = threshold
-    return result
-
 
 __all__ = [
     "BASELINE_RULES",
     "evaluate_baseline_rules",
-    "classify_with_rules",
 ]

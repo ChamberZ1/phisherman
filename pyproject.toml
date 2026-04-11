@@ -7,6 +7,7 @@ name = "phisherman"
 version = "0.1.0"
 dependencies = [
     "accelerate",
+    "flask",
     "numpy",
     "pandas>=2.0",
     "scikit-learn",

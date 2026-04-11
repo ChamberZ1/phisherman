@@ -185,6 +185,54 @@
       margin-top: 4px;
     }
 
+    .upload-area {
+      border: 1px dashed #444;
+      border-radius: 8px;
+      padding: 18px 20px;
+      margin-bottom: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .upload-area p {
+      font-size: 0.85rem;
+      color: #888;
+      margin: 0;
+    }
+
+    .upload-area p span {
+      color: #fff;
+    }
+
+    .btn-upload {
+      flex-shrink: 0;
+      padding: 8px 16px;
+      background: #111;
+      color: #fff;
+      font-size: 0.85rem;
+      font-weight: 600;
+      border: 1px solid #444;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: border-color 0.15s;
+      width: auto;
+      margin-top: 0;
+    }
+
+    .btn-upload:hover { border-color: #fff; background: #111; }
+    .btn-upload:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .parse-status {
+      font-size: 0.8rem;
+      margin-top: 8px;
+      color: #888;
+    }
+
+    .parse-status.ok  { color: #aaa; }
+    .parse-status.err { color: #f88; }
+
     .spinner {
       display: inline-block;
       width: 16px;
@@ -204,6 +252,13 @@
   <div class="container">
     <h1>Phisherman</h1>
     <p class="subtitle">Paste an email below to analyse it for phishing.</p>
+
+    <div class="upload-area">
+      <p><span>Upload a .eml file</span> to auto-fill the fields below.<br>Links embedded in the email will be extracted automatically.</p>
+      <input type="file" id="emlFile" accept=".eml" style="display:none" onchange="uploadEml()" />
+      <button class="btn-upload" id="uploadBtn" onclick="document.getElementById('emlFile').click()">Choose .eml</button>
+    </div>
+    <div id="parseStatus" class="parse-status"></div>
 
     <div class="field">
       <label for="from_address">From address</label>
@@ -226,6 +281,66 @@
   </div>
 
   <script>
+    async function uploadEml() {
+      const fileInput = document.getElementById("emlFile");
+      const uploadBtn = document.getElementById("uploadBtn");
+      const statusDiv = document.getElementById("parseStatus");
+      const file = fileInput.files[0];
+      if (!file) return;
+
+      uploadBtn.disabled = true;
+      uploadBtn.textContent = "Parsing…";
+      statusDiv.className = "parse-status";
+      statusDiv.textContent = "";
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        const res = await fetch("/parse_eml", { method: "POST", body: formData });
+        const data = await res.json();
+
+        if (data.error) {
+          statusDiv.className = "parse-status err";
+          statusDiv.textContent = "Error: " + data.error;
+          return;
+        }
+
+        document.getElementById("from_address").value = data.from_address || "";
+        document.getElementById("subject").value      = data.subject      || "";
+        document.getElementById("body").value         = data.body         || "";
+
+        // Store attachment + DKIM metadata so analyse() can send with predict
+        window._emlAttachments = {
+          has_attachment:        data.has_attachment        || false,
+          attachment_count:      data.attachment_count      || 0,
+          attachment_extensions: data.attachment_extensions || [],
+          attachment_filenames:  data.attachment_filenames  || [],
+        };
+        window._emlAuth = {
+          dkim_pass:   data.dkim_pass   || false,
+          dkim_domain: data.dkim_domain || null,
+        };
+
+        const urlNote = data.urls_found > 0
+          ? ` — ${data.urls_found} link${data.urls_found === 1 ? "" : "s"} extracted from HTML`
+          : " — no embedded links found";
+        const attachNote = data.attachment_count > 0
+          ? `, ${data.attachment_count} attachment${data.attachment_count === 1 ? "" : "s"}`
+          : "";
+        statusDiv.className = "parse-status ok";
+        statusDiv.textContent = "✓ Parsed " + file.name + urlNote + attachNote;
+      } catch (e) {
+        statusDiv.className = "parse-status err";
+        statusDiv.textContent = "Error: " + e.message;
+      } finally {
+        uploadBtn.disabled = false;
+        uploadBtn.textContent = "Choose .eml";
+        fileInput.value = "";
+        if (data.error) { window._emlAttachments = null; window._emlAuth = null; }
+      }
+    }
+
     async function analyse() {
       const btn = document.getElementById("analyseBtn");
       const resultDiv = document.getElementById("result");
@@ -245,10 +360,12 @@
       resultDiv.style.display = "none";
 
       try {
+        const attachments = window._emlAttachments || {};
+        const auth = window._emlAuth || {};
         const res = await fetch("/predict", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ from_address, subject, body }),
+          body: JSON.stringify({ from_address, subject, body, ...attachments, ...auth }),
         });
 
         const data = await res.json();
@@ -278,12 +395,22 @@
     function triggeredTag(layer) {
       if (!layer) return `<span class="tag tag-green">none (benign)</span>`;
       const map = {
-        rules: "tag-red",
-        supervised: "tag-red",
-        transformer: "tag-red",
-        isolation_forest: "tag-yellow",
+        rules:                          "tag-red",
+        ml_consensus:                   "tag-red",
+        rule_assisted:                  "tag-yellow",
+        transformer_certain:            "tag-red",
+        transformer_corroborated:       "tag-red",
+        transformer_rule_corroborated:  "tag-yellow",
+        transformer_dominant:           "tag-yellow",
       };
       return `<span class="tag ${map[layer] || 'tag-gray'}">${layer}</span>`;
+    }
+
+    function benignSub(d) {
+      const maxScore = Math.max(d.supervised_proba ?? 0, d.transformer_proba ?? 0);
+      if (maxScore >= 0.75) return "Borderline &mdash; models disagreed, no consensus reached";
+      if (maxScore >= 0.5)  return "Some signals present, but below consensus threshold";
+      return "No suspicious signals detected";
     }
 
     function renderResult(d) {
@@ -293,11 +420,30 @@
       const label = isPhish ? "Phishing detected" : "Looks clean";
       const sub = isPhish
         ? `Triggered by: ${d.triggered_by} &mdash; confidence ${pct(d.confidence)}`
-        : `Confidence: ${pct(d.confidence)}`;
+        : benignSub(d);
 
       const rules = d.rule_matches && d.rule_matches.length
         ? d.rule_matches.map(r => `<span class="tag tag-red">${r}</span>`).join("")
         : `<span class="tag tag-gray">none</span>`;
+
+      const attachments = window._emlAttachments;
+      const attachRow = attachments && attachments.attachment_count > 0
+        ? `<div class="detail-row">
+             <span class="detail-key">Attachments</span>
+             <span class="detail-val">${attachments.attachment_filenames.map(f => `<span class="tag tag-gray">${f}</span>`).join(" ")}</span>
+           </div>`
+        : "";
+
+      const auth = window._emlAuth;
+      const dkimRow = auth
+        ? `<div class="detail-row">
+             <span class="detail-key">DKIM</span>
+             <span class="detail-val">${auth.dkim_pass
+               ? `<span class="tag tag-green">pass${auth.dkim_domain ? " — " + auth.dkim_domain : ""}</span>`
+               : `<span class="tag tag-gray">not verified</span>`
+             }</span>
+           </div>`
+        : "";
 
       return `
         <div class="verdict ${verdictClass}">
@@ -323,23 +469,25 @@
 
           <div class="detail-row">
             <span class="detail-key">Supervised probability</span>
-            <span class="detail-val">${scoreTag(d.supervised_proba, 0.5)}</span>
+            <span class="detail-val">${scoreTag(d.supervised_proba, 0.55)}</span>
           </div>
 
           <div class="detail-row">
             <span class="detail-key">Transformer probability</span>
-            <span class="detail-val">${scoreTag(d.transformer_proba, 0.5)}</span>
+            <span class="detail-val">${scoreTag(d.transformer_proba, 0.75)}</span>
           </div>
 
           <div class="detail-row">
             <span class="detail-key">Isolation Forest score</span>
-            <span class="detail-val">${scoreTag(d.isolation_score, 0.55)}</span>
+            <span class="detail-val">${scoreTag(d.isolation_score, 0.75)}</span>
           </div>
 
           <div class="detail-row">
             <span class="detail-key">Triggered by</span>
             <span class="detail-val">${triggeredTag(d.triggered_by)}</span>
           </div>
+          ${dkimRow}
+          ${attachRow}
         </div>
       `;
     }
