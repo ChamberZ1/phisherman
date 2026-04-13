@@ -60,7 +60,7 @@ tests/                          # Pytest test suite
 
 ---
 
-## Setup
+## Setup (Using trained models)
 
 ```bash
 python -m venv .venv
@@ -159,7 +159,7 @@ python evaluate_batch.py --eml-dir phishing_pot/email --label phish --output res
 
 For the phishing corpus snapshot used in this repo, a full run reported **94.7%** phishing detection rate (excluding parse errors).
 
-**Benign evaluation** — a personal collection of real legitimate `.eml` files (transactional email, newsletters, account notifications from major services) used to measure the false positive rate.
+**Benign evaluation** — `data/benign_eml/` contains two sources of legitimate email: a subset of the [CSMDC2010 ham corpus](https://github.com/zrz1996/Spam-Email-Classifier-DataSet) and a small personal collection of modern `.eml` files (transactional notifications, security alerts, newsletters) exported from a real inbox. The personal sample is important because the CSMDC corpus is from 2010 and doesn't reflect the vocabulary and style of modern legitimate email.
 
 ```bash
 python evaluate_batch.py --eml-dir data/benign_eml --label benign --output benign_results.csv --limit 0
@@ -167,6 +167,7 @@ python evaluate_batch.py --eml-dir data/benign_eml --label benign --output benig
 
 For the current benign corpus snapshot in this repo, the latest full run reported **98.8%** benign pass rate (excluding parse errors).
 
+The personal inbox sample achieved a **90%** benign pass rate — lower than the CSMDC corpus, but measured after tuning the consensus thresholds, rules, and DKIM trusted sender list specifically to reduce false positives on modern legitimate email.
 
 The `evaluate_batch.py` script parses each `.eml` through the same pipeline as the web app (MIME parsing, SafeLinks decoding, href extraction) and outputs three files: `results.csv` (all verdicts), `results_review.csv` (incorrect verdicts — missed phishing when `--label phish`, false positives when `--label benign` — with body preview and layer scores for manual inspection), and `results_errors.csv` (parse failures).
 
