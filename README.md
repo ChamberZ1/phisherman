@@ -189,7 +189,7 @@ When email content is pasted as plain text, all HTML structure is lost and **act
 
 The web interface addresses this partially via `.eml` upload: raw MIME is parsed, `href` attributes are extracted from the HTML part, and real link targets are appended to the body before analysis. Microsoft SafeLinks-wrapped URLs are also decoded to their true destination. However, some signal is still lost — email clients that wrap all outbound links through their own tracking or security proxies (common in enterprise environments) obscure the final destination URL, and the system has no way to follow redirect chains to determine where a link ultimately leads.
 
-Additional metadata available in raw `.eml` files — `Reply-To`, `Return-Path`, `Received` chain, `X-Originating-IP` — are currently unused. These headers are strong phishing signals in a production detector but are not extracted or fed to any model layer in this system.
+Additional metadata available in raw `.eml` files — `Reply-To`, `Return-Path`, `Received` chain, `X-Originating-IP` — is not currently used. Incorporating these would require either new rule logic (for header-based checks like `Return-Path`/`From` domain mismatch) or retraining the ML models on features derived from them, since the current models were trained on subject/body/sender fields only and have no representation of header-derived signals.
 
 ### English-only training data
 
