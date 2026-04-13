@@ -25,9 +25,9 @@ The architecture evolved into a consensus model: all four layers run on every em
 **Layers:**
 
 1. **Rule-Based** — Weighted heuristic rules (IP URLs, domain mismatches, risky TLDs, shorteners, malicious attachment extensions, etc.). Three rules (`ip_url`, `punycode_domain`, `malicious_attachment_ext`) act as hard blocks; the rest contribute to a vote score. Could be extended with SPF, DKIM, DMARC, and TLS checks.
-2. **Supervised (SVM)** — TF-IDF + LinearSVC trained on labeled email data. Probability ≥ 0.55 casts a phishing vote.
+2. **Supervised (Support Vector Machine)** — TF-IDF + LinearSVC trained on labeled email data. Probability ≥ 0.55 casts a phishing vote.
 3. **Transformer (DistilBERT)** — Fine-tuned HuggingFace transformer for deep semantic classification. Probability ≥ 0.75 casts a phishing vote. Modular — can be swapped for a heavier model.
-4. **Isolation Forest** — Trained on benign-only data to detect anomalies. Achieved ROC-AUC ~0.61 — too weak to vote reliably. Included as a **passive scoring layer only**: its score is reported in output but does not affect the final verdict.
+4. **Unsupervised (Isolation Forest)** — Trained on benign-only data to detect anomalies. Achieved ROC-AUC ~0.61 — too weak to vote reliably. Included as a **passive scoring layer only**: its score is reported in output but does not affect the final verdict.
 
 ---
 
